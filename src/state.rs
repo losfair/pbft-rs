@@ -7,7 +7,7 @@ use sha2::digest::FixedOutput;
 use sha2::Digest;
 use std::collections::HashSet;
 
-pub struct RbftState {
+pub struct PbftState {
     config: Config,
     message_sender: Box<MessageSender>,
     current_view: u64,
@@ -29,9 +29,9 @@ struct LogEntry {
     committed: bool,
 }
 
-impl RbftState {
-    pub fn new<M: MessageSender + Send + 'static>(config: Config, msg_sender: M) -> RbftState {
-        RbftState {
+impl PbftState {
+    pub fn new<M: MessageSender + Send + 'static>(config: Config, msg_sender: M) -> PbftState {
+        PbftState {
             config: config,
             message_sender: Box::new(msg_sender),
             current_view: 0,
