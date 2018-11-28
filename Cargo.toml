@@ -2,6 +2,7 @@
 name = "pbft"
 version = "0.0.0"
 authors = ["losfair <zhy20000919@hotmail.com>"]
+description = "Practical Byzantine Fault Tolerance implemented in Rust."
 license = "MIT"
 repository = "https://github.com/losfair/pbft-rs"
 edition = "2018"
