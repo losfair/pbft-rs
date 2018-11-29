@@ -11,6 +11,7 @@ use std::thread::spawn;
 #[derive(Clone, Default)]
 struct MessageSink {
     messages: Arc<Mutex<HashMap<Vec<u8>, HashSet<String>>>>,
+    orders: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>>,
 }
 
 impl MessageSink {
@@ -18,9 +19,16 @@ impl MessageSink {
         self.messages
             .lock()
             .unwrap()
-            .entry(message)
+            .entry(message.clone())
             .or_insert(HashSet::new())
-            .insert(node_id);
+            .insert(node_id.clone());
+
+        self.orders
+            .lock()
+            .unwrap()
+            .entry(node_id)
+            .or_insert(Vec::new())
+            .push(message);
     }
 
     fn check(&self, expected_messages: Option<Vec<Vec<u8>>>, num_nodes: usize) {
@@ -59,6 +67,19 @@ impl MessageSink {
             }
             println!("verified {} messages", messages.len());
         }
+
+        let orders = self.orders.lock().unwrap();
+        orders
+            .iter()
+            .fold(None, |last: Option<&Vec<Vec<u8>>>, (_k, v)| {
+                if let Some(last) = last {
+                    if *last != *v {
+                        panic!("value/order mismatch: {:?} {:?}", last, v);
+                    }
+                }
+
+                Some(v)
+            });
     }
 }
 
