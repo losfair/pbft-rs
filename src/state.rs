@@ -16,6 +16,13 @@ pub struct PbftState {
     log_ckpt_offset: u64,
     log_commit_offset: usize,
     logs: Vec<Option<LogEntry>>,
+    retry_queue: Vec<Retry>,
+}
+
+struct Retry {
+    remaining: usize,
+    from: String,
+    message: Message,
 }
 
 #[derive(Clone)]
@@ -49,6 +56,7 @@ impl PbftState {
             log_ckpt_offset: 0,
             log_commit_offset: 0,
             logs: vec![None; CKPT_INTERVAL],
+            retry_queue: Vec::new(),
         }
     }
 
@@ -60,11 +68,40 @@ impl PbftState {
                 return;
             }
         };
-        match msg {
+
+        self.process_with_retry(Retry {
+            remaining: MAX_RETRY,
+            from: from,
+            message: msg,
+        });
+
+        self.do_retry();
+    }
+
+    fn do_retry(&mut self) {
+        let retry_queue = ::std::mem::replace(&mut self.retry_queue, Vec::new());
+        for retry in retry_queue {
+            self.process_with_retry(retry);
+        }
+    }
+
+    fn process_with_retry(&mut self, retry: Retry) {
+        let from = retry.from.clone();
+
+        let success = match retry.message.clone() {
             Message::Init(msg) => self.handle_init(from, msg),
             Message::PrePrepare(msg) => self.handle_pre_prepare(from, msg),
             Message::Prepare(msg) => self.handle_prepare(from, msg),
             Message::Commit(msg) => self.handle_commit(from, msg),
+        };
+
+        if !success && retry.remaining > 0 {
+            eprintln!("queueing for retry ({} time(s) remaining)", retry.remaining);
+            self.retry_queue.push(Retry {
+                remaining: retry.remaining - 1,
+                from: retry.from,
+                message: retry.message,
+            });
         }
     }
 
@@ -89,7 +126,7 @@ impl PbftState {
         }
     }
 
-    fn handle_init(&mut self, _from: String, msg: InitMessage) {
+    fn handle_init(&mut self, _from: String, msg: InitMessage) -> bool {
         if self.is_primary() {
             let view = self.current_view;
             let nonce = self.next_nonce;
@@ -105,6 +142,8 @@ impl PbftState {
             self.host
                 .send_message(primary, &bincode::serialize(&Message::Init(msg)).unwrap());
         }
+
+        true
     }
 
     fn get_primary(&self) -> usize {
@@ -115,17 +154,17 @@ impl PbftState {
         self.get_primary() == self.local_index
     }
 
-    fn handle_pre_prepare(&mut self, from: String, msg: PrePrepareMessage) {
+    fn handle_pre_prepare(&mut self, from: String, msg: PrePrepareMessage) -> bool {
         if msg.view != self.current_view {
             eprintln!("view mismatch"); // TODO: what should we do here?
-            return;
+            return false;
         }
 
         if msg.nonce < self.log_ckpt_offset
             || msg.nonce - self.log_ckpt_offset >= CKPT_INTERVAL as u64
         {
             eprintln!("invalid nonce");
-            return;
+            return false;
         }
 
         if from != self.config.nodes[self.get_primary()] {
@@ -134,13 +173,13 @@ impl PbftState {
                 self.config.nodes[self.get_primary()],
                 from
             );
-            return;
+            return false;
         }
 
         let log_slot = (msg.nonce - self.log_ckpt_offset) as usize;
         if self.logs[log_slot].is_some() {
             eprintln!("duplicate log");
-            return;
+            return true;
         }
 
         let content_digest = DefaultDigest::default()
@@ -165,27 +204,29 @@ impl PbftState {
             nonce: msg.nonce,
             digest: content_digest,
         }));
+
+        true
     }
 
-    fn handle_prepare(&mut self, from: String, msg: PrepareMessage) {
+    fn handle_prepare(&mut self, from: String, msg: PrepareMessage) -> bool {
         if msg.view != self.current_view {
             eprintln!("view mismatch"); // TODO: what should we do here?
-            return;
+            return false;
         }
 
         if msg.nonce < self.log_ckpt_offset
             || msg.nonce - self.log_ckpt_offset >= CKPT_INTERVAL as u64
         {
             eprintln!("invalid nonce");
-            return;
+            return false;
         }
 
         let log_slot = (msg.nonce - self.log_ckpt_offset) as usize;
 
         if let Some(ref mut log) = self.logs[log_slot] {
             if log.digest != msg.digest {
-                eprintln!("digest mismatch"); // tODO: what to do?
-                return;
+                eprintln!("digest mismatch"); // TODO: what to do?
+                return false;
             }
 
             log.prepares.insert(from);
@@ -196,22 +237,25 @@ impl PbftState {
                     nonce: msg.nonce,
                 }));
             }
+
+            true
         } else {
             eprintln!("log does not exist");
+            false
         }
     }
 
-    fn handle_commit(&mut self, from: String, msg: CommitMessage) {
+    fn handle_commit(&mut self, from: String, msg: CommitMessage) -> bool {
         if msg.view != self.current_view {
             eprintln!("view mismatch"); // TODO: what should we do here?
-            return;
+            return false;
         }
 
         if msg.nonce < self.log_ckpt_offset
             || msg.nonce - self.log_ckpt_offset >= CKPT_INTERVAL as u64
         {
             eprintln!("invalid nonce");
-            return;
+            return false;
         }
 
         let log_slot = (msg.nonce - self.log_ckpt_offset) as usize;
@@ -226,8 +270,10 @@ impl PbftState {
                 log.committed = true;
                 self.do_commit();
             }
+            true
         } else {
             eprintln!("log does not exist");
+            false
         }
     }
 }

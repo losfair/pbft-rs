@@ -96,7 +96,7 @@ impl Host for NodeHost {
     }
 
     fn apply_commit(&mut self, content: &[u8]) {
-        println!("[{}] CONTENT = {:?}", self.id, content);
+        //println!("[{}] CONTENT = {:?}", self.id, content);
         self.message_sink
             .put_message(self.id.clone(), content.to_vec());
     }
