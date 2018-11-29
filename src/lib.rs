@@ -5,7 +5,10 @@ extern crate bincode;
 extern crate sha2;
 
 pub mod config;
+pub mod host;
 pub mod message;
-pub mod network;
 pub mod params;
 pub mod state;
+
+#[cfg(test)]
+mod state_test;
