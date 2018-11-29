@@ -1,8 +1,14 @@
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Message {
+    Init(InitMessage),
     PrePrepare(PrePrepareMessage),
     Prepare(PrepareMessage),
     Commit(CommitMessage),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InitMessage {
+    pub content: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

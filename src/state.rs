@@ -1,7 +1,7 @@
 use bincode;
 use crate::config::*;
+use crate::host::Host;
 use crate::message::*;
-use crate::network::MessageSender;
 use crate::params::*;
 use sha2::digest::FixedOutput;
 use sha2::Digest;
@@ -9,7 +9,9 @@ use std::collections::HashSet;
 
 pub struct PbftState {
     config: Config,
-    message_sender: Box<MessageSender>,
+    local_index: usize,
+    next_nonce: u64, // only used if the current node is primary
+    host: Box<Host>,
     current_view: u64,
     log_ckpt_offset: u64,
     log_commit_offset: usize,
@@ -30,10 +32,20 @@ struct LogEntry {
 }
 
 impl PbftState {
-    pub fn new<M: MessageSender + Send + 'static>(config: Config, msg_sender: M) -> PbftState {
+    pub fn new<H: Host + Send + 'static>(config: Config, host: H) -> PbftState {
+        let local_index = config
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, x)| **x == config.id)
+            .unwrap()
+            .0;
+
         PbftState {
             config: config,
-            message_sender: Box::new(msg_sender),
+            local_index: local_index,
+            next_nonce: 0,
+            host: Box::new(host),
             current_view: 0,
             log_ckpt_offset: 0,
             log_commit_offset: 0,
@@ -50,6 +62,7 @@ impl PbftState {
             }
         };
         match msg {
+            Message::Init(msg) => self.handle_init(from, msg),
             Message::PrePrepare(msg) => self.handle_pre_prepare(from, msg),
             Message::Prepare(msg) => self.handle_prepare(from, msg),
             Message::Commit(msg) => self.handle_commit(from, msg),
@@ -58,7 +71,7 @@ impl PbftState {
 
     fn broadcast_message(&mut self, msg: &Message) {
         for peer in &self.config.nodes {
-            self.message_sender
+            self.host
                 .send_message(peer, &bincode::serialize(msg).unwrap());
         }
     }
@@ -67,6 +80,7 @@ impl PbftState {
         while self.log_commit_offset < self.logs.len() {
             if let Some(ref log) = self.logs[self.log_commit_offset] {
                 if log.committed {
+                    self.host.apply_commit(&log.from, &log.content);
                     self.log_commit_offset += 1;
                     continue;
                 }
@@ -74,6 +88,32 @@ impl PbftState {
 
             break;
         }
+    }
+
+    fn handle_init(&mut self, _from: String, msg: InitMessage) {
+        if self.is_primary() {
+            let view = self.current_view;
+            let nonce = self.next_nonce;
+            self.next_nonce += 1;
+
+            self.broadcast_message(&Message::PrePrepare(PrePrepareMessage {
+                view: view,
+                nonce: nonce,
+                content: msg.content,
+            }));
+        } else {
+            let primary = self.config.nodes[self.get_primary()].as_str();
+            self.host
+                .send_message(primary, &bincode::serialize(&Message::Init(msg)).unwrap());
+        }
+    }
+
+    fn get_primary(&self) -> usize {
+        (self.current_view % (self.config.nodes.len() as u64)) as usize
+    }
+
+    fn is_primary(&self) -> bool {
+        self.get_primary() == self.local_index
     }
 
     fn handle_pre_prepare(&mut self, from: String, msg: PrePrepareMessage) {
@@ -86,6 +126,15 @@ impl PbftState {
             || msg.nonce - self.log_ckpt_offset >= CKPT_INTERVAL as u64
         {
             eprintln!("invalid nonce");
+            return;
+        }
+
+        if from != self.config.nodes[self.get_primary()] {
+            eprintln!(
+                "only primary node {} can send PrePrepapre, from = {}",
+                self.config.nodes[self.get_primary()],
+                from
+            );
             return;
         }
 
