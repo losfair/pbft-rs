@@ -20,7 +20,6 @@ pub struct PbftState {
 
 #[derive(Clone)]
 struct LogEntry {
-    from: String,
     view: u64,
     nonce: u64,
     content: Vec<u8>,
@@ -80,7 +79,7 @@ impl PbftState {
         while self.log_commit_offset < self.logs.len() {
             if let Some(ref log) = self.logs[self.log_commit_offset] {
                 if log.committed {
-                    self.host.apply_commit(&log.from, &log.content);
+                    self.host.apply_commit(&log.content);
                     self.log_commit_offset += 1;
                     continue;
                 }
@@ -151,7 +150,6 @@ impl PbftState {
             .to_vec();
 
         self.logs[log_slot] = Some(LogEntry {
-            from: from,
             view: msg.view,
             nonce: msg.nonce,
             content: msg.content,

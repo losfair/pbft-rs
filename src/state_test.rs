@@ -39,11 +39,10 @@ impl Host for NodeHost {
             .unwrap();
     }
 
-    fn apply_commit(&mut self, sender: &str, content: &[u8]) {
+    fn apply_commit(&mut self, content: &[u8]) {
         println!(
-            "[{}] SENDER = {}, CONTENT = {}",
+            "[{}] CONTENT = {}",
             self.id,
-            sender,
             ::std::str::from_utf8(content).unwrap()
         );
     }

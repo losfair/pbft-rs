@@ -3,5 +3,5 @@ pub trait Host: Send {
     fn send_message(&self, peer: &str, msg: &[u8]);
 
     /// Applies a commit.
-    fn apply_commit(&mut self, sender: &str, content: &[u8]);
+    fn apply_commit(&mut self, content: &[u8]);
 }
