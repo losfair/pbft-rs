@@ -3,6 +3,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate bincode;
 extern crate sha2;
+extern crate rand;
 
 pub mod config;
 pub mod host;
